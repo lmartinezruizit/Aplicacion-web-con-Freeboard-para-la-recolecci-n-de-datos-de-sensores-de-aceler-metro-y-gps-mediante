@@ -1,0 +1,80 @@
+#! /usr/bin/python
+# -*- coding: iso-8859-15 -*
+# Importamos los modulos necesarios
+import os
+from gps import *
+from time import *
+import time
+import threading
+import time
+import json
+import httplib
+from serial import Serial
+
+# Configuramos los parámetros de conexión con el Context Broker que se ha desplegado en un Docker
+READ_TIME = 15
+TCP_Buffer = 512
+TCP_IP_ORION = '192.168.1.177'
+TCP_Puerto_ORION = 1026
+
+# Realizamos la conexión con el Context Broker
+orion_con = httplib.HTTPConnection(TCP_IP_ORION, TCP_Puerto_ORION)
+headers = {"Content-type": "application/json", "Accept": "application/json"}
+data = json.loads('{"id" : "GPS", "type" : "GPS", "latitude" : {"value" : 0, "type" : "float"}, "longitude" : {"value" : 0, "type" : "Float"}}')
+# Creamos la entidad la primera vez
+try:
+ orion_con.request('POST', '/v2/entities', json.dumps(data), headers)
+ resp = orion_con.getresponse()
+ print resp.read() # En caso de que la entidad ya exista, aparecerá un error indicandotelo
+except Exception as e:
+ print (e)
+ 
+# Lectura de datos y envío al Context Broker
+gpsd = None
+#os.system('clear')
+orion_con.close()
+class GpsPoller(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        global gpsd
+        gpsd = gps(mode=WATCH_ENABLE)
+        self.current_value = None
+        self.running = True 
+
+    def run(self):
+        global gpsd
+        while gpsp.running:
+            gpsd.next()
+
+if __name__ == '__main__':
+    gpsp = GpsPoller()
+    try:
+        gpsp.start()
+        while True:
+            orion_con = httplib.HTTPConnection(TCP_IP_ORION, TCP_Puerto_ORION)
+            print ("Resultado de la medición:")
+            print '- Latitud: ' , gpsd.fix.latitude 
+            print '- Longitud: ' , gpsd.fix.longitude 
+
+            if gpsd.fix.latitude == 0.0 and gpsd.fix.longitude == 0.0:
+                print "Conectando"
+            else:
+                print "Conexión establecida"
+                data1 = open("locations.txt", "a") 
+                data1.write("%s,%s\n" % (gpsd.fix.latitude, gpsd.fix.longitude))
+                # Envío de datos al Context Broker mediante petición PUT
+                data = json.loads('{"latitude" : {"value" : ' + str(gpsd.fix.latitude) + ', "type" : "Float"}, "longitude" : {"value" : ' + str(gpsd.fix.longitude) + ', "type" : "Float"}}')
+                headers = {"Content-type": "application/json", "Accept": "application/json"}
+                orion_con.request("PUT", "/v2/entities/GPS/attrs", json.dumps(data), headers)
+                # Cerramos la conexión con el Context Broker
+                orion_con.close()
+                data1.close()
+            # Dormimos hasta realizar la siguiente medición
+            time.sleep(READ_TIME - 1)
+            # Limpiamos el terminal para cada medición
+            os.system('clear')
+    except (KeyboardInterrupt, SystemExit):
+        print "\nDesconectando GPS..."
+        gpsp.running = False
+        gpsp.join()
+    print "Ok.\nSaliendo..."
